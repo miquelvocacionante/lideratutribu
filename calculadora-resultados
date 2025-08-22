@@ -121,7 +121,7 @@ function Card({ children, className = "" }) {
 
 function Segmented({ value, onChange, options }) {
   return (
-    <div className="inline-flex rounded-full bg-white/10 p-1 text-sm">
+    <div className="inline-flex rounded-full bg-white/10 p-1 text-sm" role="tablist" aria-label="Tipo de audiencia">
       {options.map((opt) => {
         const active = value === opt.value;
         return (
@@ -129,6 +129,8 @@ function Segmented({ value, onChange, options }) {
             key={opt.value}
             onClick={() => onChange(opt.value)}
             className={`px-3 py-1.5 rounded-full transition-colors ${active ? "bg-white text-slate-900" : "text-white/80 hover:text-white"}`}
+            role="tab"
+            aria-selected={active}
           >
             {opt.label}
           </button>
@@ -162,7 +164,7 @@ function NumberField({ value, onChange, suffix = "", min, max, step = 1 }) {
         max={max}
         step={step}
         onChange={(e) => onChange(clamp(Number(e.target.value), min, max))}
-        className="w-28 rounded-xl bg-white/10 px-3 py-2 text-white placeholder-white/50 outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-indigo-400"
+        className="w-32 rounded-xl bg-white/10 px-3 py-2 text-white placeholder-white/50 outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-indigo-400"
       />
       {suffix && <span className="text-white/70 text-sm">{suffix}</span>}
     </div>
@@ -190,10 +192,28 @@ const CustomTooltip = ({ active, payload, label }) => {
   return null;
 };
 
+function CheckItem({ children }) {
+  return (
+    <li className="flex gap-3">
+      <span className="mt-1 inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">✓</span>
+      <span>{children}</span>
+    </li>
+  );
+}
+
+function CrossItem({ children }) {
+  return (
+    <li className="flex gap-3">
+      <span className="mt-1 inline-flex h-5 w-5 items-center justify-center rounded-full bg-rose-100 text-rose-700">✕</span>
+      <span>{children}</span>
+    </li>
+  );
+}
+
 // ======================================
 // Componente principal
 // ======================================
-export default function ComunidadCalculator() {
+export default function CalculadoraComunidad() {
   const [audiencia, setAudiencia] = useState(56000);
   const [tipo, setTipo] = useState("social"); // "email" | "social"
   const [cuota, setCuota] = useState(25);
@@ -239,12 +259,26 @@ export default function ComunidadCalculator() {
         { a: 9000, tipo: "social", cuota: 100, expectedTop: 251411 },
         { a: 2000, tipo: "social", cuota: 100, expectedTop: 78462 },
       ];
+      // Prop-based sanity checks adicionales
+      const more = [
+        { a: 50000, tipo: "email", cuota: 25 },
+        { a: 120000, tipo: "social", cuota: 25 },
+      ];
+
       cases.forEach((c) => {
         const r = simular({ audiencia: c.a, tipo: c.tipo, cuotaMensual: c.cuota });
         const top = Math.round(r[r.length - 1].revTop);
         const ok = Math.abs(top - c.expectedTop) / c.expectedTop <= tol;
         // eslint-disable-next-line no-console
         console.assert(ok, `Test fallo para ${c.tipo} a=${c.a}, esperado≈${c.expectedTop}, got=${top}`);
+      });
+
+      more.forEach((c) => {
+        const r = simular({ audiencia: c.a, tipo: c.tipo, cuotaMensual: c.cuota });
+        const last = r[r.length - 1];
+        const valid = r.length === 6 && last.revTop >= last.revAvg && isFinite(last.revTop) && isFinite(last.revAvg);
+        // eslint-disable-next-line no-console
+        console.assert(valid, `Prop test fallo para ${c.tipo} a=${c.a}, cuota=${c.cuota}`);
       });
     } catch (e) {
       // eslint-disable-next-line no-console
@@ -301,11 +335,9 @@ export default function ComunidadCalculator() {
                 <div className="mt-1 text-lg font-semibold">{eur(cuota)}</div>
               </div>
             </div>
-            <div className="mt-5">
-              <Slider value={cuota} min={1} max={99999} step={1} onChange={setCuota} />
-            </div>
-            <div className="mt-4 flex items-center justify-between">
-              <div className="text-sm text-white/60">Ajusta el precio mensual</div>
+            {/* Solo campo numérico, sin slider */}
+            <div className="mt-5 flex items-center justify-between">
+              <div className="text-sm text-white/60">Introduce un precio mensual</div>
               <NumberField value={cuota} onChange={setCuota} min={1} max={99999} step={1} suffix="€/mes" />
             </div>
           </Card>
@@ -363,6 +395,102 @@ export default function ComunidadCalculator() {
             </div>
           </div>
         </div>
+
+        {/* Cómo funciona: fondo blanco */}
+        <section className="mt-16 rounded-3xl bg-white text-slate-900 p-6 md:p-10 ring-1 ring-black/5">
+          <h2 className="text-3xl md:text-4xl font-extrabold text-center">Cómo funciona esta calculadora</h2>
+          <p className="mt-3 text-slate-600 text-center max-w-3xl mx-auto">
+            Hemos construido esta calculadora con datos reales de comunidades en Circle para mostrar tasas medias y del top 10% de conversión de
+            seguidores y suscriptores a miembros de pago, además de crecimiento real de membresías y tasas de cancelación. Sin grandes suposiciones; solo datos.
+          </p>
+
+          <div className="mt-10 grid gap-6 md:grid-cols-2">
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="flex -space-x-2">
+                  <span className="inline-block h-8 w-8 rounded-full bg-gradient-to-tr from-amber-400 to-pink-500 ring-2 ring-white"></span>
+                  <span className="inline-block h-8 w-8 rounded-full bg-gradient-to-tr from-emerald-400 to-teal-500 ring-2 ring-white"></span>
+                  <span className="inline-block h-8 w-8 rounded-full bg-gradient-to-tr from-sky-400 to-indigo-500 ring-2 ring-white"></span>
+                </div>
+              </div>
+              <h3 className="text-lg font-semibold">Seguidores en redes</h3>
+              <p className="text-slate-600 mt-1">Tu audiencia más amplia y con mayor alcance, pero con menores tasas de conversión a clientes de pago.</p>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="flex -space-x-2">
+                  <span className="inline-block h-8 w-8 rounded-full bg-gradient-to-tr from-fuchsia-400 to-rose-500 ring-2 ring-white"></span>
+                  <span className="inline-block h-8 w-8 rounded-full bg-gradient-to-tr from-violet-400 to-indigo-500 ring-2 ring-white"></span>
+                  <span className="inline-block h-8 w-8 rounded-full bg-gradient-to-tr from-amber-400 to-orange-500 ring-2 ring-white"></span>
+                </div>
+              </div>
+              <h3 className="text-lg font-semibold">Suscriptores de email</h3>
+              <p className="text-slate-600 mt-1">Una audiencia más enfocada que ha “levantado la mano” para seguirte; a medida que generas confianza, su potencial de conversión es mayor.</p>
+            </div>
+          </div>
+
+          <div className="flex justify-center my-8">
+            <div className="w-28 border-b-2 border-dashed border-indigo-300"></div>
+          </div>
+
+          <div className="flex justify-center">
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm max-w-2xl">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="flex -space-x-2">
+                  <span className="inline-block h-8 w-8 rounded-full bg-gradient-to-tr from-yellow-400 to-lime-500 ring-2 ring-white"></span>
+                  <span className="inline-block h-8 w-8 rounded-full bg-gradient-to-tr from-pink-400 to-rose-500 ring-2 ring-white"></span>
+                </div>
+              </div>
+              <h3 className="text-lg font-semibold">Miembros de la comunidad</h3>
+              <p className="text-slate-600 mt-1">Tu audiencia principal de clientes con mejor encaje, comprometida con tu marca y que aporta ingresos recurrentes, feedback y fidelización.</p>
+            </div>
+          </div>
+        </section>
+
+        {/* Qué puedes esperar: fondo blanco */}
+        <section className="mt-8 rounded-3xl bg-white text-slate-900 p-6 md:p-10 ring-1 ring-black/5">
+          <h2 className="text-3xl md:text-4xl font-extrabold text-center">Qué puedes esperar</h2>
+          <div className="mt-8 grid gap-6 md:grid-cols-2">
+            <div className="rounded-2xl border border-emerald-200 bg-white p-6 shadow-sm">
+              <h3 className="text-lg font-semibold mb-4">Esta calculadora hará:</h3>
+              <ul className="space-y-4 text-slate-700">
+                <CheckItem>Revelar el potencial de ingresos de membresías de primer nivel.</CheckItem>
+                <CheckItem>Ayudarte a entender el impacto de las comunidades (de cualquier tamaño) a lo largo del tiempo.</CheckItem>
+                <CheckItem>Mostrar por qué nosotros (y más de 15.000 personas) apostamos por modelos de comunidad para blindar los negocios.</CheckItem>
+                <CheckItem>Ayudarte a imaginar, planificar y construir tu futuro.</CheckItem>
+              </ul>
+            </div>
+
+            <div className="rounded-2xl border border-rose-200 bg-white p-6 shadow-sm">
+              <h3 className="text-lg font-semibold mb-4">Esta calculadora no hará:</h3>
+              <ul className="space-y-4 text-slate-700">
+                <CrossItem>Prometer que ganarás millones desde el primer día.</CrossItem>
+                <CrossItem>Fingir que crear y gestionar una comunidad exitosa es fácil.</CrossItem>
+                <CrossItem>Contabilizar otras vías de ingreso añadidas (cursos, coaching o patrocinios), aunque puedas gestionarlas en Circle.</CrossItem>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        {/* CTA final estilo banner */}
+        <section className="mt-8">
+          <div className="rounded-3xl bg-gradient-to-br from-indigo-800 via-indigo-900 to-purple-900 px-6 py-10 md:px-16 md:py-16 text-center ring-1 ring-white/10">
+            <div className="text-3xl md:text-5xl font-extrabold">
+              Podrías estar ganando <span className="text-emerald-400">{eur(ultimo.revTop)}</span> más con Circle
+            </div>
+            <div className="mt-6 flex justify-center">
+              <a
+                href={resultsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-full bg-gradient-to-r from-sky-500 to-indigo-600 px-6 py-3 md:px-8 md:py-4 font-semibold shadow-lg shadow-indigo-800/30 hover:shadow-indigo-700/40"
+              >
+                Guardar mis resultados
+              </a>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
   );
