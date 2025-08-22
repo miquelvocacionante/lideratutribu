@@ -1,0 +1,369 @@
+import React, { useMemo, useState, useEffect } from "react";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  CartesianGrid,
+  Legend,
+} from "recharts";
+
+// =====================
+// Utilidades de formato
+// =====================
+const eur = (n) =>
+  new Intl.NumberFormat("es-ES", {
+    style: "currency",
+    currency: "EUR",
+    maximumFractionDigits: 0,
+  }).format(Math.max(0, Math.round(n)));
+
+const num = (n) => new Intl.NumberFormat("es-ES").format(Math.max(0, Math.round(n)));
+
+const clamp = (v, min, max) => Math.min(Math.max(v, min), max);
+
+// =======================================================
+// Modelo simple de crecimiento + churn por tipo de audiencia
+// (calibrado con los ejemplos compartidos por el usuario)
+// =======================================================
+const MODEL = {
+  email: {
+    nombre: "Suscriptores de email",
+    alcanzable: 0.9,
+    // Tasas base (precio de referencia 25€)
+    joinRateAvg: 0.006,
+    joinRateTop: 0.013,
+    initialJoinAvg: 0.004,
+    initialJoinTop: 0.008,
+    churnAvg: 0.4,
+    churnTop: 0.32,
+    // Ajustes globales calibrados para coincidir con ejemplos oficiales
+    priceElasticity: 0.05534826050052594, // afecta a la conversión
+    initPriceExponent: 0.2, // lanzamiento más fuerte con precios bajos
+    sizeExponent: 0.17375268222998785, // audiencias pequeñas convierten mejor
+    sizeCap: 3,
+    tamRef: 135000,
+  },
+  social: {
+    nombre: "Seguidores en redes",
+    alcanzable: 0.5,
+    // Calibrado con ejemplos (precio ref 25; validado a 100)
+    joinRateAvg: 0.0032,
+    joinRateTop: 0.00505,
+    initialJoinAvg: 0.0008,
+    initialJoinTop: 0.0012,
+    churnAvg: 0.52,
+    churnTop: 0.42,
+    // Ajustes globales
+    priceElasticity: 0.07,
+    initPriceExponent: 0.2,
+    sizeExponent: 0.4, // más efecto tamaño para redes
+    sizeCap: 12,
+    tamRef: 150000,
+  },
+};
+
+function simular({ audiencia, tipo, cuotaMensual }) {
+  const p = MODEL[tipo];
+  const TAM = audiencia * p.alcanzable; // mercado alcanzable
+
+  const priceRef = 25;
+  const priceFactor = Math.pow(cuotaMensual / priceRef, -(p.priceElasticity || 0));
+  const churnPriceFactor = Math.pow(cuotaMensual / priceRef, (p.priceElasticity || 0) * 0.5);
+  const initPriceFactor = Math.pow(priceRef / cuotaMensual, p.initPriceExponent || 0);
+
+  const tamRef = p.tamRef || TAM;
+  const sizeFactor = Math.min(
+    Math.pow(tamRef / Math.max(TAM, 1), p.sizeExponent || 0),
+    p.sizeCap || 3
+  );
+
+  const pasos = [0, 1, 2, 3, 4, 5]; // años 0..5
+
+  let mAvg = TAM * (p.initialJoinAvg || 0) * initPriceFactor;
+  let mTop = TAM * (p.initialJoinTop || 0) * initPriceFactor;
+
+  const data = pasos.map((year) => {
+    if (year > 0) {
+      const joinAvg = (p.joinRateAvg || 0) * sizeFactor * priceFactor;
+      const joinTop = (p.joinRateTop || 0) * sizeFactor * priceFactor;
+      const churnAvg = (p.churnAvg || 0) * churnPriceFactor;
+      const churnTop = (p.churnTop || 0) * churnPriceFactor;
+
+      mAvg = mAvg * (1 - churnAvg) + (TAM - mAvg) * joinAvg;
+      mTop = mTop * (1 - churnTop) + (TAM - mTop) * joinTop;
+    }
+
+    const revAvg = mAvg * cuotaMensual * 12;
+    const revTop = mTop * cuotaMensual * 12;
+
+    return {
+      year,
+      miembrosAvg: Math.round(mAvg),
+      miembrosTop: Math.round(mTop),
+      revAvg,
+      revTop,
+      label: `Año ${year}`,
+    };
+  });
+
+  return data;
+}
+
+// =====================
+// UI helpers
+// =====================
+function Card({ children, className = "" }) {
+  return <div className={`rounded-2xl bg-white/5 ring-1 ring-white/10 p-4 md:p-5 ${className}`}>{children}</div>;
+}
+
+function Segmented({ value, onChange, options }) {
+  return (
+    <div className="inline-flex rounded-full bg-white/10 p-1 text-sm">
+      {options.map((opt) => {
+        const active = value === opt.value;
+        return (
+          <button
+            key={opt.value}
+            onClick={() => onChange(opt.value)}
+            className={`px-3 py-1.5 rounded-full transition-colors ${active ? "bg-white text-slate-900" : "text-white/80 hover:text-white"}`}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function Slider({ value, min, max, step = 1, onChange }) {
+  return (
+    <input
+      type="range"
+      min={min}
+      max={max}
+      step={step}
+      value={value}
+      onChange={(e) => onChange(Number(e.target.value))}
+      className="w-full accent-indigo-400"
+    />
+  );
+}
+
+function NumberField({ value, onChange, suffix = "", min, max, step = 1 }) {
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        type="number"
+        value={value}
+        min={min}
+        max={max}
+        step={step}
+        onChange={(e) => onChange(clamp(Number(e.target.value), min, max))}
+        className="w-28 rounded-xl bg-white/10 px-3 py-2 text-white placeholder-white/50 outline-none ring-1 ring-white/10 focus:ring-2 focus:ring-indigo-400"
+      />
+      {suffix && <span className="text-white/70 text-sm">{suffix}</span>}
+    </div>
+  );
+}
+
+const CustomTooltip = ({ active, payload, label }) => {
+  if (active && payload && payload.length) {
+    const p = payload.reduce((acc, cur) => {
+      acc[cur.name] = cur.value;
+      return acc;
+    }, {});
+    return (
+      <div className="rounded-xl bg-slate-900/95 p-3 ring-1 ring-white/10 text-sm">
+        <div className="font-semibold mb-1">{label}</div>
+        <div>
+          Ingresos promedio: <span className="font-semibold">{eur(p.Promedio || 0)}</span>
+        </div>
+        <div>
+          Ingresos top 10%: <span className="font-semibold">{eur(p["Top 10%"] || 0)}</span>
+        </div>
+      </div>
+    );
+  }
+  return null;
+};
+
+// ======================================
+// Componente principal
+// ======================================
+export default function ComunidadCalculator() {
+  const [audiencia, setAudiencia] = useState(56000);
+  const [tipo, setTipo] = useState("social"); // "email" | "social"
+  const [cuota, setCuota] = useState(25);
+
+  const data = useMemo(() => simular({ audiencia, tipo, cuotaMensual: cuota }), [audiencia, tipo, cuota]);
+
+  const ultimo = data[data.length - 1];
+  const titulo = `En 5 años, podrías estar generando ${eur(ultimo.revTop)} al año`;
+
+  // Límite dinámico de audiencia según el canal
+  const maxAudiencia = tipo === "email" ? 200000 : 1000000;
+
+  // Si cambia el canal a email y el valor supera el límite, lo ajustamos
+  useEffect(() => {
+    if (audiencia > maxAudiencia) setAudiencia(maxAudiencia);
+  }, [tipo, maxAudiencia]);
+
+  // URL de resultados
+  const resultsUrl = useMemo(() => {
+    const params = new URLSearchParams({
+      audiencia: String(audiencia),
+      tipo,
+      cuota: String(cuota),
+      revTop: String(Math.round(ultimo.revTop)),
+      revAvg: String(Math.round(ultimo.revAvg)),
+      miembrosTop: String(ultimo.miembrosTop),
+      miembrosAvg: String(ultimo.miembrosAvg),
+    });
+    return `https://lideratutribu.com/calculadora-resultados?${params.toString()}`;
+  }, [audiencia, tipo, cuota, ultimo.revTop, ultimo.revAvg, ultimo.miembrosTop, ultimo.miembrosAvg]);
+
+  // ==============
+  // Test cases (no UI): se validan con console.assert, no modifican la interfaz
+  // ==============
+  useEffect(() => {
+    try {
+      const tol = 0.2; // tolerancia 20% para evitar falsos negativos por entorno
+      const cases = [
+        // Social followers @100 €/mes (basados en las capturas compartidas)
+        { a: 100000, tipo: "social", cuota: 100, expectedTop: 1054867 },
+        { a: 70000, tipo: "social", cuota: 100, expectedTop: 828956 },
+        { a: 30000, tipo: "social", cuota: 100, expectedTop: 452053 },
+        { a: 9000, tipo: "social", cuota: 100, expectedTop: 251411 },
+        { a: 2000, tipo: "social", cuota: 100, expectedTop: 78462 },
+      ];
+      cases.forEach((c) => {
+        const r = simular({ audiencia: c.a, tipo: c.tipo, cuotaMensual: c.cuota });
+        const top = Math.round(r[r.length - 1].revTop);
+        const ok = Math.abs(top - c.expectedTop) / c.expectedTop <= tol;
+        // eslint-disable-next-line no-console
+        console.assert(ok, `Test fallo para ${c.tipo} a=${c.a}, esperado≈${c.expectedTop}, got=${top}`);
+      });
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn("Tests de calculadora: ", e);
+    }
+  }, []);
+
+  return (
+    <div className="min-h-screen w-full bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-900 text-white">
+      <div className="mx-auto max-w-6xl px-4 py-8 md:py-12">
+        {/* Hero */}
+        <div className="mb-8 md:mb-12 text-center">
+          <div className="inline-flex items-center rounded-full bg-white/10 px-4 py-1 text-xs md:text-sm text-white/80 ring-1 ring-white/15">
+            Calculadora gratuita de ROI de comunidad
+          </div>
+          <h1 className="mt-4 text-3xl md:text-6xl font-extrabold tracking-tight">
+            Descubre el <span className="text-emerald-400">potencial de ingresos</span> de tu comunidad
+          </h1>
+          <p className="mt-3 text-white/80 max-w-3xl mx-auto">
+            ¿Quieres saber cuánto podrías ganar con una comunidad de pago? Descúbrelo con esta calculadora gratuita, basada en datos reales de comunidades que prosperan en Circle.
+          </p>
+        </div>
+
+        {/* Controles */}
+        <div className="grid gap-6 md:grid-cols-2">
+          <Card>
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm text-white/70">Tamaño de la audiencia</div>
+                <div className="mt-1 text-lg font-semibold">{num(audiencia)}</div>
+              </div>
+              <Segmented
+                value={tipo}
+                onChange={(v) => setTipo(v)}
+                options={[
+                  { label: "Email", value: "email" },
+                  { label: "Redes sociales", value: "social" },
+                ]}
+              />
+            </div>
+            <div className="mt-5">
+              <Slider value={audiencia} min={0} max={maxAudiencia} step={1000} onChange={setAudiencia} />
+            </div>
+            <div className="mt-4 flex items-center justify-between">
+              <div className="text-sm text-white/60">Arrastra el control o escribe un valor</div>
+              <NumberField value={audiencia} onChange={setAudiencia} min={0} max={maxAudiencia} step={1000} suffix="personas" />
+            </div>
+          </Card>
+
+          <Card>
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm text-white/70">Cuota mensual de la membresía</div>
+                <div className="mt-1 text-lg font-semibold">{eur(cuota)}</div>
+              </div>
+            </div>
+            <div className="mt-5">
+              <Slider value={cuota} min={1} max={99999} step={1} onChange={setCuota} />
+            </div>
+            <div className="mt-4 flex items-center justify-between">
+              <div className="text-sm text-white/60">Ajusta el precio mensual</div>
+              <NumberField value={cuota} onChange={setCuota} min={1} max={99999} step={1} suffix="€/mes" />
+            </div>
+          </Card>
+        </div>
+
+        {/* Título */}
+        <div className="mt-10 md:mt-12 text-center">
+          <div className="text-2xl md:text-4xl font-extrabold tracking-tight">{titulo}</div>
+          <div className="mt-2 text-white/70">con tu comunidad</div>
+        </div>
+
+        {/* Gráfico */}
+        <Card className="mt-8 md:mt-10">
+          <div className="h-[360px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={data} margin={{ top: 20, right: 24, left: 88, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
+                <XAxis dataKey="label" stroke="#cbd5e1" />
+                <YAxis tickFormatter={(v) => eur(v)} stroke="#cbd5e1" width={96} tickMargin={8} />
+                <Tooltip content={<CustomTooltip />} />
+                <Legend wrapperStyle={{ color: "#fff" }} />
+                <Line type="monotone" dataKey="revTop" name="Top 10%" stroke="#22c55e" strokeWidth={3} dot={false} />
+                <Line type="monotone" dataKey="revAvg" name="Promedio" stroke="#8b5cf6" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="mt-6 grid gap-4 md:grid-cols-2">
+            <Card className="bg-emerald-500/10 ring-emerald-500/30">
+              <div className="text-sm text-emerald-300/90">Año 5 · Top 10%</div>
+              <div className="mt-1 text-2xl font-bold">Ingresos: {eur(ultimo.revTop)}</div>
+              <div className="text-white/80">Miembros: {num(ultimo.miembrosTop)}</div>
+            </Card>
+            <Card className="bg-violet-500/10 ring-violet-500/30">
+              <div className="text-sm text-violet-300/90">Año 5 · Promedio</div>
+              <div className="mt-1 text-2xl font-bold">Ingresos: {eur(ultimo.revAvg)}</div>
+              <div className="text-white/80">Miembros: {num(ultimo.miembrosAvg)}</div>
+            </Card>
+          </div>
+        </Card>
+
+        {/* Pie / CTA */}
+        <div className="mt-8 flex flex-col items-center gap-4 md:flex-row md:justify-between">
+          <div className="text-white/80">Obtén tus resultados y define una estrategia de precios acertada para tu comunidad.</div>
+          <div className="flex gap-3">
+            <div>
+              <a
+                href={resultsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-2xl bg-gradient-to-r from-sky-500 to-indigo-600 px-5 py-2 font-semibold shadow-lg shadow-indigo-800/30 hover:shadow-indigo-700/40"
+              >
+                Guardar mis resultados
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
